@@ -1,0 +1,409 @@
+{{define "index.html"}}
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maps — Localitas</title>
+    <base href="{{.BasePath}}">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root {
+            --color-bg-base: #fcfbfe; --color-bg-elevated: #f0eef7;
+            --color-text-primary: #1a1625; --color-text-secondary: #4a3f5c;
+            --color-glass-base: rgba(255, 255, 255, 0.75);
+            --color-glass-border: rgba(139, 117, 169, 0.35);
+            --color-accent: #7d6b96;
+            --shadow: 0 4px 16px rgba(139, 117, 169, 0.08);
+        }
+        [data-theme="dark"] {
+            --color-bg-base: #120f1a; --color-bg-elevated: #221b2e;
+            --color-text-primary: #e8e4f0; --color-text-secondary: #b3a8c8;
+            --color-glass-base: rgba(37, 31, 53, 0.85);
+            --color-glass-border: rgba(184, 164, 212, 0.15);
+            --color-accent: #c5b3e0;
+            --shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+        }
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--color-bg-base); color: var(--color-text-primary); display: flex; flex-direction: column; }
+        .glass { background: var(--color-glass-base); border: 1px solid var(--color-glass-border); box-shadow: var(--shadow); }
+        .map-toast { position: fixed; top: 1rem; left: 50%; transform: translateX(-50%); z-index: 10000; padding: 0.75rem 1.25rem; border-radius: 0.5rem; font-size: 0.875rem; max-width: 90%; background: var(--color-glass-base); border: 1px solid var(--color-glass-border); box-shadow: var(--shadow); backdrop-filter: blur(12px); animation: fadeIn 0.2s ease; }
+        .map-toast.error { border-color: #e74c3c; color: #e74c3c; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(-0.5rem); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+        .controls {
+            position: absolute; top: 0.75rem; left: 0.75rem; z-index: 1000;
+            display: inline-flex; flex-direction: column;
+            border-radius: 0.75rem; padding: 0.75rem;
+        }
+        .controls input {
+            width: 100%; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem;
+            background: var(--color-bg-base); border: 1px solid var(--color-glass-border);
+            border-radius: 0.5rem; color: var(--color-text-primary); font-size: 0.875rem;
+            box-sizing: border-box;
+        }
+        .controls input:focus { outline: none; border-color: var(--color-accent); }
+        .controls-row { display: flex; gap: 0.5rem; }
+        .btn {
+            padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid var(--color-glass-border);
+            background: var(--color-glass-base); color: var(--color-text-primary);
+            cursor: pointer; font-size: 0.8125rem; display: flex; align-items: center; gap: 0.25rem;
+        }
+        .btn:hover { border-color: var(--color-accent); }
+        .btn-primary { background: var(--color-accent); color: var(--color-bg-elevated); border-color: var(--color-accent); flex: 1; justify-content: center; }
+        .mode-btn { padding: 0.375rem 0.5rem; font-size: 0.75rem; }
+        .mode-btn.active { background: var(--color-accent); color: var(--color-bg-elevated); border-color: var(--color-accent); }
+        .poi-suggestions { display:none; position:absolute; top:100%; left:0; right:0; z-index:1000; background:var(--color-glass-base); backdrop-filter:blur(12px); border:1px solid var(--color-glass-border); border-radius:0 0 0.375rem 0.375rem; max-height:180px; overflow-y:auto; }
+        .poi-suggestion { padding:0.375rem 0.75rem; cursor:pointer; font-size:0.8125rem; border-bottom:1px solid var(--color-glass-border); }
+        .poi-suggestion:hover { background:rgba(142,122,168,0.15); }
+
+        .directions-panel {
+            position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+            max-height: 40%; overflow-y: auto; border-radius: 0.75rem 0.75rem 0 0;
+            padding: 1rem; display: none;
+        }
+        .directions-panel.visible { display: block; }
+        .dir-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+        .dir-summary { font-weight: 600; }
+        .dir-meta { font-size: 0.8125rem; color: var(--color-text-secondary); }
+        .dir-step { display: flex; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid var(--color-glass-border); font-size: 0.875rem; }
+        .dir-step:last-child { border-bottom: none; }
+        .dir-step-num { width: 24px; height: 24px; background: var(--color-accent); color: var(--color-bg-elevated); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; flex-shrink: 0; }
+        .dir-step-text { flex: 1; }
+        .dir-step-dist { color: var(--color-text-secondary); font-size: 0.75rem; white-space: nowrap; }
+        .close-btn { background: none; border: none; cursor: pointer; color: var(--color-text-secondary); padding: 0.25rem; }
+
+        #map { flex: 1; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <div class="controls glass">
+        <div style="position:relative;">
+            <input type="text" id="from-input" placeholder="From: address or place" autocomplete="off" onkeydown="if(event.key==='Enter')getDirections()" oninput="poiAutocomplete('from-input','from-suggestions',this.value)">
+            <div id="from-suggestions" class="poi-suggestions"></div>
+        </div>
+        <div style="position:relative;">
+            <input type="text" id="to-input" placeholder="To: address or place" autocomplete="off" onkeydown="if(event.key==='Enter')getDirections()" oninput="poiAutocomplete('to-input','to-suggestions',this.value)">
+            <div id="to-suggestions" class="poi-suggestions"></div>
+        </div>
+        <div class="controls-row">
+            <button class="btn mode-btn active" data-mode="auto" onclick="setMode(this)" title="Auto"><i data-lucide="zap" class="w-4 h-4" style="display:inline"></i></button>
+            <button class="btn mode-btn" data-mode="car" onclick="setMode(this)" title="Drive"><i data-lucide="car" class="w-4 h-4" style="display:inline"></i></button>
+            <button class="btn mode-btn" data-mode="bike" onclick="setMode(this)" title="Bike"><i data-lucide="bike" class="w-4 h-4" style="display:inline"></i></button>
+            <button class="btn mode-btn" data-mode="foot" onclick="setMode(this)" title="Walk"><i data-lucide="footprints" class="w-4 h-4" style="display:inline"></i></button>
+            <button class="btn btn-primary" onclick="getDirections()" style="flex:1"><i data-lucide="navigation" class="w-4 h-4" style="display:inline"></i> Go</button>
+        </div>
+        <div class="controls-row" style="margin-top:0.375rem;">
+            <button class="btn" id="refresh-poi-btn" onclick="refreshPOIDatabase()" title="Refresh POI Database" style="flex:1;justify-content:center;"><i data-lucide="database" class="w-4 h-4" style="display:inline"></i> POI Refresh</button>
+            <a href="javascript:void(0)" onclick="showDocs()" class="btn" style="text-decoration:none;cursor:pointer;flex:1;justify-content:center;" title="Documentation"><i data-lucide="book-open" class="w-4 h-4" style="display:inline"></i> Docs</a>
+        </div>
+    </div>
+
+    <div class="directions-panel glass" id="directions-panel">
+        <div class="dir-header">
+            <div>
+                <div class="dir-summary" id="dir-summary"></div>
+                <div class="dir-meta" id="dir-meta"></div>
+            </div>
+            <button class="close-btn" onclick="closeDirections()"><i data-lucide="x" class="w-5 h-5" style="display:inline"></i></button>
+        </div>
+        <div id="dir-steps"></div>
+    </div>
+
+    <script>
+        window.jsDebug = function() { var u = (window.parent && window.parent.currentUser) || {}; if (u.js_debug) console.log.apply(console, arguments); };
+        window.jsWarn = function() { var u = (window.parent && window.parent.currentUser) || {}; if (u.js_debug) console.warn.apply(console, arguments); };
+        (function() {
+            const html = document.documentElement;
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            html.setAttribute('data-theme', localStorage.getItem('theme') || (prefersDark ? 'dark' : 'light'));
+            window.addEventListener('message', e => { if (e.data && e.data.type === 'theme-change') html.setAttribute('data-theme', e.data.theme); });
+        })();
+
+        const map = L.map('map', {zoomControl: false}).setView([37.7749, -122.4194], 12);
+        L.control.zoom({position: 'topright'}).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19,
+        }).addTo(map);
+
+        let routeLayer = null;
+        let markers = [];
+        let currentMode = 'auto';
+
+        var _overlayDiv = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            lucide.createIcons();
+            if (new URLSearchParams(window.location.search).get('docs') === 'true') showDocs();
+        });
+
+        function _showOverlay(content) {
+            if (_overlayDiv) _overlayDiv.remove();
+            _overlayDiv = document.createElement('div');
+            _overlayDiv.style.cssText = 'position:absolute;inset:0;z-index:2000;background:var(--color-bg-base);overflow-y:auto;';
+            _overlayDiv.innerHTML = content;
+            document.body.appendChild(_overlayDiv);
+            lucide.createIcons();
+        }
+
+        function _hideOverlay() {
+            if (_overlayDiv) { _overlayDiv.remove(); _overlayDiv = null; }
+        }
+
+        function showDocs() {
+            _showOverlay('<div style="padding:1rem;color:var(--color-text-secondary);">Loading documentation...</div>');
+            fetch('/apps/maps/help?format=html')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                _showOverlay(html);
+            });
+        }
+
+        function helpShowSwagger() {
+            var w = document.getElementById('help-wrapper');
+            if (!w) return;
+            var swaggerUrl = w.dataset.swaggerUrl;
+            w.innerHTML = '<div style="display:flex;flex-direction:column;flex:1;min-height:0;">'
+                + '<div style="padding:0.5rem 1rem;border-bottom:1px solid var(--color-glass-border);display:flex;align-items:center;gap:0.75rem;">'
+                + '<a onclick="showDocs()" style="color:var(--color-accent);cursor:pointer;font-size:0.8125rem;text-decoration:none;">\u2190 Back to docs</a>'
+                + '<span style="font-size:0.8125rem;font-weight:500;color:var(--color-text-primary);">API Documentation</span></div>'
+                + '<iframe src="' + swaggerUrl + '" style="flex:1;border:none;width:100%;"></iframe></div>';
+        }
+
+        function setMode(btn) {
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentMode = btn.dataset.mode;
+        }
+
+        function getDirections() {
+            const from = document.getElementById('from-input').value.trim();
+            const to = document.getElementById('to-input').value.trim();
+
+            if (!from && to) {
+                geocodeAndShow(to);
+                return;
+            }
+            if (!from || !to) return;
+
+            fetch('api/directions?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&mode=' + currentMode)
+                .then(r => { if (!r.ok) return r.json().then(d => { throw new Error(d.error); }); return r.json(); })
+                .then(data => renderDirections(data))
+                .catch(err => showMapToast(err.message));
+
+            if (window.parent !== window) {
+                window.parent.postMessage({ type: 'localitas-navigate', search: '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) + '&mode=' + currentMode }, '*');
+            }
+        }
+
+        function geocodeAndShow(query) {
+            fetch('api/geocode?q=' + encodeURIComponent(query))
+                .then(r => r.json())
+                .then(loc => {
+                    clearMap();
+                    const m = L.marker([loc.lat, loc.lon]).addTo(map).bindPopup(loc.name).openPopup();
+                    markers.push(m);
+                    map.setView([loc.lat, loc.lon], 15);
+                });
+        }
+
+        function renderDirections(data) {
+            clearMap();
+
+            // Draw route
+            if (data.route_coords && data.route_coords.length > 0) {
+                routeLayer = L.polyline(data.route_coords, { color: '#7d6b96', weight: 5, opacity: 0.8 }).addTo(map);
+                map.fitBounds(routeLayer.getBounds(), { padding: [60, 60] });
+            }
+
+            // Markers
+            const fromMarker = L.marker([data.from.lat, data.from.lon]).addTo(map).bindPopup('Start: ' + data.from.name);
+            const toMarker = L.marker([data.to.lat, data.to.lon]).addTo(map).bindPopup('End: ' + data.to.name);
+            markers.push(fromMarker, toMarker);
+
+            // Directions panel
+            const modeLabels = { car: 'Driving', bike: 'Cycling', foot: 'Walking' };
+            document.getElementById('dir-summary').textContent = (modeLabels[data.mode] || data.mode) + ' · ' + data.distance + ' · ' + data.duration;
+            document.getElementById('dir-meta').textContent = data.from.name.split(',')[0] + ' → ' + data.to.name.split(',')[0];
+
+            let stepsHTML = '';
+            data.steps.forEach((step, i) => {
+                stepsHTML += '<div class="dir-step">';
+                stepsHTML += '<div class="dir-step-num">' + (i + 1) + '</div>';
+                stepsHTML += '<div class="dir-step-text">' + esc(step.instruction) + '</div>';
+                if (step.distance) stepsHTML += '<div class="dir-step-dist">' + step.distance + '</div>';
+                stepsHTML += '</div>';
+            });
+            document.getElementById('dir-steps').innerHTML = stepsHTML;
+            document.getElementById('directions-panel').classList.add('visible');
+            lucide.createIcons();
+        }
+
+        function closeDirections() {
+            document.getElementById('directions-panel').classList.remove('visible');
+        }
+
+        function clearMap() {
+            if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+        }
+
+        function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        // Restore from URL params
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('from') && params.get('to')) {
+            document.getElementById('from-input').value = params.get('from');
+            document.getElementById('to-input').value = params.get('to');
+            if (params.get('mode')) {
+                currentMode = params.get('mode');
+                document.querySelectorAll('.mode-btn').forEach(b => {
+                    b.classList.toggle('active', b.dataset.mode === currentMode);
+                });
+            }
+            getDirections();
+        } else if (params.get('q')) {
+            document.getElementById('to-input').value = params.get('q');
+            geocodeAndShow(params.get('q'));
+        }
+        var _acTimer = null;
+        function poiAutocomplete(inputId, sugId, q) {
+            clearTimeout(_acTimer);
+            var box = document.getElementById(sugId);
+            if (!q || q.length < 2) { box.style.display = 'none'; return; }
+            _acTimer = setTimeout(function() {
+                fetch('api/poi/autocomplete?q=' + encodeURIComponent(q))
+                    .then(function(r) { return r.json(); })
+                    .then(function(results) {
+                        if (!results || !results.length) { box.style.display = 'none'; return; }
+                        box.innerHTML = results.map(function(r) {
+                            return '<div class="poi-suggestion" onmousedown="pickPOI(\'' + inputId + '\',\'' + sugId + '\',\'' + r.name.replace(/'/g, "\\'") + '\')">' + esc(r.name) + '</div>';
+                        }).join('');
+                        box.style.display = '';
+                    })
+                    .catch(function() { box.style.display = 'none'; });
+            }, 300);
+        }
+
+        function pickPOI(inputId, sugId, name) {
+            document.getElementById(inputId).value = name;
+            document.getElementById(sugId).style.display = 'none';
+        }
+
+        function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        document.addEventListener('click', function(e) {
+            document.querySelectorAll('.poi-suggestions').forEach(function(el) { el.style.display = 'none'; });
+        });
+
+        var _ws = null;
+        var _pendingRunId = null;
+
+        function connectWebSocket() {
+            var base = document.querySelector('base');
+            var href = base ? base.getAttribute('href') : '/';
+            var coreOrigin = href.replace(/\/apps\/ext\/maps\/$/, '');
+            var wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            var wsURL = wsProto + '//' + location.host + '/ws';
+            _ws = new WebSocket(wsURL);
+            _ws.onmessage = function(event) {
+                try {
+                    var msg = JSON.parse(event.data);
+                    if (msg.type === 'notification' && msg.data && msg.data.app === 'automation') {
+                        var d = msg.data.data || {};
+                        if (_pendingRunId && d.run_id === _pendingRunId) {
+                            _pendingRunId = null;
+                            var btn = document.getElementById('refresh-poi-btn');
+                            btn.disabled = false;
+                            btn.style.opacity = '1';
+                            btn.title = 'Refresh POI Database';
+                            if (d.status === 'completed') {
+                                showNotification('POI Import', msg.data.title + ': Database refreshed');
+                            } else {
+                                showNotification('POI Import', msg.data.title + ': ' + (msg.data.message || 'failed'));
+                            }
+                        }
+                    }
+                } catch(e) {}
+            };
+            _ws.onclose = function() { setTimeout(connectWebSocket, 5000); };
+        }
+
+        connectWebSocket();
+
+        async function refreshPOIDatabase() {
+            var btn = document.getElementById('refresh-poi-btn');
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.title = 'Importing POIs...';
+
+            try {
+                var coreBase = getCoreBaseURL();
+                var listResp = await fetch(coreBase + '/apps/automation/api/automations');
+                var automationsResp = await listResp.json();
+                var autoList = (automationsResp && automationsResp.automations) || [];
+                var poiAuto = autoList.find(function(a) { return a.name === 'Maps POI Import'; });
+
+                if (!poiAuto) {
+                    var center = map.getCenter();
+                    var resp = await fetch('api/poi/import', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({lat:center.lat, lon:center.lng, radius:10000, category:'amenity'})});
+                    var result = await resp.json();
+                    showNotification('POI Import', 'Imported ' + (result.imported || 0) + ' places. Total: ' + (result.total || 0));
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                    btn.title = 'Refresh POI Database';
+                    return;
+                }
+
+                var triggerResp = await fetch(coreBase + '/apps/automation/api/automations/' + poiAuto.id + '/trigger', {method:'POST', headers:{'Content-Type':'application/json'}});
+                var run = await triggerResp.json();
+                if (run && run.id) {
+                    _pendingRunId = run.id;
+                } else {
+                    showNotification('POI Import', 'Failed to trigger import');
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                }
+            } catch(e) {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                showNotification('POI Import', 'Error: ' + e.message);
+            }
+        }
+
+        function getCoreBaseURL() {
+            var base = document.querySelector('base');
+            var href = base ? base.getAttribute('href') : '/';
+            return href.replace(/\/apps\/ext\/maps\/$/, '');
+        }
+
+        function showMapToast(msg, level) {
+            var el = document.createElement('div');
+            el.className = 'map-toast ' + (level || 'error');
+            el.textContent = msg;
+            document.body.appendChild(el);
+            setTimeout(function() { el.remove(); }, 5000);
+        }
+
+        function showNotification(title, message) {
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(title, {body: message});
+            } else if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission().then(function(perm) {
+                    if (perm === 'granted') new Notification(title, {body: message});
+                    else showMapToast(title + ': ' + message);
+                });
+            } else {
+                showMapToast(title + ': ' + message);
+            }
+        }
+    </script>
+</body>
+</html>
+{{end}}
