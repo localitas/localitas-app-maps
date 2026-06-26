@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-const poiImportAutomationName = "Maps POI Import"
+const poiImportAutomationName = "Maps: POI Import"
 
 func RegisterPOIAutomation(coreURL, token, appURL string) {
 	if automationExists(coreURL, token, poiImportAutomationName) {
@@ -21,7 +21,7 @@ func RegisterPOIAutomation(coreURL, token, appURL string) {
 		"description": "Imports points of interest from OpenStreetMap Overpass API for cached local search",
 		"dag_config": map[string]interface{}{
 			"dag_id":      "maps_poi_import",
-			"name":        "Maps POI Import",
+			"name":        "Maps: POI Import",
 			"description": "Bulk imports POIs for configured areas",
 			"nodes": []map[string]interface{}{
 				{
