@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/localitas/localitas-go/httputil"
 )
 
 type handler struct {
@@ -16,21 +18,21 @@ type handler struct {
 func (h *handler) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		writeErr(w, http.StatusBadRequest, "query parameter 'q' is required")
+		writeErr(w, r, http.StatusBadRequest, "query parameter 'q' is required")
 		return
 	}
 	loc, err := GeocodeWithCache(r.Context(), h.app.Store, q)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "%v", err)
+		writeErr(w, r, http.StatusNotFound, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, loc)
+	writeJSON(w, r, http.StatusOK, loc)
 }
 
 func (h *handler) handlePOIAutocomplete(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		writeErr(w, http.StatusBadRequest, "q is required")
+		writeErr(w, r, http.StatusBadRequest, "q is required")
 		return
 	}
 
@@ -53,7 +55,7 @@ func (h *handler) handlePOIAutocomplete(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	writeJSON(w, http.StatusOK, results)
+	writeJSON(w, r, http.StatusOK, results)
 }
 
 func (h *handler) handleDirections(w http.ResponseWriter, r *http.Request) {
@@ -61,38 +63,38 @@ func (h *handler) handleDirections(w http.ResponseWriter, r *http.Request) {
 	to := r.URL.Query().Get("to")
 	mode := r.URL.Query().Get("mode")
 	if from == "" || to == "" {
-		writeErr(w, http.StatusBadRequest, "'from' and 'to' query parameters are required")
+		writeErr(w, r, http.StatusBadRequest, "'from' and 'to' query parameters are required")
 		return
 	}
 	result, err := GetDirections(r.Context(), h.app.Store, from, to, mode)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, r, http.StatusOK, result)
 }
 
 func (h *handler) handlePOISearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		writeErr(w, http.StatusBadRequest, "q is required")
+		writeErr(w, r, http.StatusBadRequest, "q is required")
 		return
 	}
 	if h.app.Store == nil {
-		writeJSON(w, http.StatusOK, []POI{})
+		writeJSON(w, r, http.StatusOK, []POI{})
 		return
 	}
 	pois, err := h.app.Store.SearchPOI(r.Context(), q, 20)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pois)
+	writeJSON(w, r, http.StatusOK, pois)
 }
 
 func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 	if h.app.Store == nil {
-		writeErr(w, http.StatusInternalServerError, "no store configured")
+		writeErr(w, r, http.StatusInternalServerError, "no store configured")
 		return
 	}
 	var req struct {
@@ -102,7 +104,7 @@ func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 		Category string  `json:"category"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
+		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if req.Radius <= 0 {
@@ -114,11 +116,11 @@ func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 
 	pois, err := FetchOSMPOIs(r.Context(), req.Lat, req.Lon, req.Radius, req.Category)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
 	count, _ := h.app.Store.BulkInsertPOIs(r.Context(), pois)
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"imported": count,
 		"total":    h.app.Store.GetPOICount(r.Context()),
 	})
@@ -219,14 +221,10 @@ func joinNonEmpty(parts []string, sep string) string {
 	return out
 }
 
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+func writeJSON(w http.ResponseWriter, r *http.Request, status int, v interface{}) {
+	httputil.WriteResponse(w, r, status, v)
 }
 
-func writeErr(w http.ResponseWriter, status int, format string, args ...interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf(format, args...)})
+func writeErr(w http.ResponseWriter, r *http.Request, status int, format string, args ...interface{}) {
+	httputil.WriteError(w, r, status, format, args...)
 }
