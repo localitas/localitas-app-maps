@@ -3,7 +3,6 @@ package maps
 import (
 	"bytes"
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 )
@@ -12,7 +11,7 @@ const poiImportAutomationName = "Maps: POI Import"
 
 func RegisterPOIAutomation(coreURL, token, appURL string) {
 	if automationExists(coreURL, token, poiImportAutomationName) {
-		log.Printf("✅ Maps POI automation already registered")
+		logger.Info("POI automation already registered")
 		return
 	}
 
@@ -58,7 +57,7 @@ func RegisterPOIAutomation(coreURL, token, appURL string) {
 	b, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", coreURL+"/apps/automation/api/automations", bytes.NewReader(b))
 	if err != nil {
-		log.Printf("⚠️  Failed to create POI automation request: %v", err)
+		logger.Error("failed to create POI automation request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -69,15 +68,15 @@ func RegisterPOIAutomation(coreURL, token, appURL string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("⚠️  Failed to register POI automation: %v", err)
+		logger.Error("failed to register POI automation", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-		log.Printf("✅ Registered POI import automation (weekly Sunday 3am)")
+		logger.Info("registered POI import automation", "schedule", "weekly Sunday 3am")
 	} else {
-		log.Printf("⚠️  POI automation registration returned %d", resp.StatusCode)
+		logger.Warn("POI automation registration returned unexpected status", "status", resp.StatusCode)
 	}
 }
 
