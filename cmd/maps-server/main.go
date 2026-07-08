@@ -97,6 +97,7 @@ func serveAction(ctx context.Context, cmd *cli.Command) error {
 	mux := http.NewServeMux()
 	a.RegisterRoutes(mux)
 	mux.HandleFunc("GET /health.json", maps.HandleHealth)
+	mux.HandleFunc("GET /cron.json", maps.HandleCron)
 
 	ln, err := net.Listen("tcp", cmd.String("listen"))
 	if err != nil {
