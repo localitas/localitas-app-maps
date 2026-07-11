@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	client "github.com/localitas/localitas-go"
 	"github.com/localitas/localitas-go/httputil"
 )
 
@@ -114,16 +115,28 @@ func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 		req.Category = "amenity"
 	}
 
-	pois, err := FetchOSMPOIs(r.Context(), req.Lat, req.Lon, req.Radius, req.Category)
+	work := func(ctx context.Context) (map[string]interface{}, error) {
+		pois, err := FetchOSMPOIs(ctx, req.Lat, req.Lon, req.Radius, req.Category)
+		if err != nil {
+			return nil, err
+		}
+		count, _ := h.app.Store.BulkInsertPOIs(ctx, pois)
+		return map[string]interface{}{
+			"imported": count,
+			"total":    h.app.Store.GetPOICount(ctx),
+		}, nil
+	}
+
+	if client.RunAsync(w, r, h.app.client, work) {
+		return
+	}
+
+	result, err := work(r.Context())
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	count, _ := h.app.Store.BulkInsertPOIs(r.Context(), pois)
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{
-		"imported": count,
-		"total":    h.app.Store.GetPOICount(r.Context()),
-	})
+	writeJSON(w, r, http.StatusOK, result)
 }
 
 func FetchOSMPOIs(ctx context.Context, lat, lon float64, radius int, category string) ([]POI, error) {
