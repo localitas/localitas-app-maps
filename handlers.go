@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"time"
 
-	client "github.com/localitas/localitas-go"
 	"github.com/localitas/localitas-go/httputil"
 )
 
@@ -127,7 +126,7 @@ func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 		}, nil
 	}
 
-	if client.RunAsync(w, r, h.app.client, work) {
+	if h.app.client.RunAsync(w, r, work) {
 		return
 	}
 
