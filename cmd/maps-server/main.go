@@ -111,6 +111,8 @@ func serveAction(ctx context.Context, cmd *cli.Command) error {
 		logger.Error("service registry failed", "error", err)
 	}
 
+	maps.RegisterPOIAutomation(ctx, c, selfURL)
+
 	shutdown, err := maps.BroadcastMDNS(addr.Port, maps.DefaultHealth.Name)
 	if err != nil {
 		logger.Error("mDNS broadcast failed", "error", err)

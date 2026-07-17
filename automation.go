@@ -1,36 +1,35 @@
 package maps
 
 import (
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"time"
+	"context"
+
+	client "github.com/localitas/localitas-go"
 )
 
 const poiImportAutomationName = "Maps: POI Import"
 
-func RegisterPOIAutomation(coreURL, token, appURL string) {
-	if automationExists(coreURL, token, poiImportAutomationName) {
+func RegisterPOIAutomation(ctx context.Context, c *client.Client, appURL string) {
+	if automationExists(ctx, c, poiImportAutomationName) {
 		logger.Info("POI automation already registered")
 		return
 	}
 
-	body := map[string]interface{}{
-		"name":        poiImportAutomationName,
-		"description": "Imports points of interest from OpenStreetMap Overpass API for cached local search",
-		"dag_config": map[string]interface{}{
-			"dag_id":      "maps_poi_import",
-			"name":        "Maps: POI Import",
-			"description": "Bulk imports POIs for configured areas",
-			"nodes": []map[string]interface{}{
+	req := client.CreateAutomationRequest{
+		Name:        poiImportAutomationName,
+		Description: "Imports points of interest from OpenStreetMap Overpass API for cached local search",
+		DAGConfig: client.DAGConfig{
+			DAGID:       "maps_poi_import",
+			Name:        "Maps: POI Import",
+			Description: "Bulk imports POIs for configured areas",
+			Nodes: []client.DAGNode{
 				{
-					"node_id":            "import_amenities",
-					"node_type":          "http-api",
-					"execution_strategy": "raft-leader",
-					"metadata": map[string]interface{}{
+					NodeID:            "import_amenities",
+					NodeType:          "http-api",
+					ExecutionStrategy: "raft-leader",
+					Metadata: map[string]any{
 						"url":    appURL + "/api/poi/import",
 						"method": "POST",
-						"body": map[string]interface{}{
+						"body": map[string]any{
 							"lat":      37.3349,
 							"lon":      -122.0090,
 							"radius":   10000,
@@ -43,69 +42,30 @@ func RegisterPOIAutomation(coreURL, token, appURL string) {
 				},
 			},
 		},
-		"trigger_type": "periodic",
-		"trigger_config": map[string]interface{}{
-			"periodic": map[string]interface{}{
-				"schedule":    "0 3 * * 0",
-				"timezone":    "Local",
-				"max_retries": 1,
+		TriggerType: "periodic",
+		TriggerConfig: client.TriggerConfig{
+			Periodic: &client.PeriodicTrigger{
+				Schedule:   "0 3 * * 0",
+				Timezone:   "Local",
+				MaxRetries: 1,
 			},
 		},
-		"is_enabled": true,
+		IsEnabled: true,
 	}
 
-	b, _ := json.Marshal(body)
-	req, err := http.NewRequest("POST", coreURL+"/apps/automation/api/automations", bytes.NewReader(b))
-	if err != nil {
-		logger.Error("failed to create POI automation request", "error", err)
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
+	if _, err := c.Automation().Create(ctx, req); err != nil {
 		logger.Error("failed to register POI automation", "error", err)
 		return
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-		logger.Info("registered POI import automation", "schedule", "weekly Sunday 3am")
-	} else {
-		logger.Warn("POI automation registration returned unexpected status", "status", resp.StatusCode)
-	}
+	logger.Info("registered POI import automation", "schedule", "weekly Sunday 3am")
 }
 
-func automationExists(coreURL, token, name string) bool {
-	req, err := http.NewRequest("GET", coreURL+"/apps/automation/api/automations", nil)
+func automationExists(ctx context.Context, c *client.Client, name string) bool {
+	automations, err := c.Automation().List(ctx)
 	if err != nil {
 		return false
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return false
-	}
-	var result struct {
-		Automations []struct {
-			Name string `json:"name"`
-		} `json:"automations"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false
-	}
-	for _, a := range result.Automations {
+	for _, a := range automations {
 		if a.Name == name {
 			return true
 		}
