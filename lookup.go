@@ -13,6 +13,20 @@ import (
 	"github.com/localitas/localitas-go"
 )
 
+// httpClient is a single pooled client shared across all outbound map/geocoding
+// calls (Nominatim/OSRM/Overpass), created once instead of per request, so
+// connections to those fixed upstream hosts are reused. It carries no hard
+// Timeout; each call bounds itself with a context deadline (see the timeout
+// constants) so different operations keep their own limits while sharing the
+// pool. http.Client is safe for concurrent use.
+var httpClient = &http.Client{}
+
+const (
+	geocodeTimeout    = 10 * time.Second
+	directionsTimeout = 15 * time.Second
+	osmPOITimeout     = 30 * time.Second
+)
+
 func nominatimLocationBias() string {
 	return client.LocationBias()
 }
@@ -22,10 +36,11 @@ func Geocode(ctx context.Context, address string) (*Location, error) {
 		return nil, fmt.Errorf("address is required")
 	}
 	u := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1&accept-language=en%s", url.QueryEscape(address), nominatimLocationBias())
+	ctx, cancel := context.WithTimeout(ctx, geocodeTimeout)
+	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("geocode failed: %w", err)
 	}
@@ -52,10 +67,11 @@ func GeocodeMulti(ctx context.Context, address string, limit int) ([]Location, e
 		limit = 5
 	}
 	u := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=%d&accept-language=en%s", url.QueryEscape(address), limit, nominatimLocationBias())
+	ctx, cancel := context.WithTimeout(ctx, geocodeTimeout)
+	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +142,11 @@ func GetDirections(ctx context.Context, store *Store, fromAddr, toAddr, mode str
 	u := fmt.Sprintf("%s/route/v1/driving/%.7f,%.7f;%.7f,%.7f?overview=full&geometries=geojson&steps=true",
 		osrmServer, from.Lon, from.Lat, to.Lon, to.Lat)
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	routeCtx, cancel := context.WithTimeout(ctx, directionsTimeout)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(routeCtx, "GET", u, nil)
 	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("routing failed: %w", err)
 	}
