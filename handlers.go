@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 
 	"github.com/localitas/localitas-go/httputil"
 )
@@ -147,11 +146,12 @@ func FetchOSMPOIs(ctx context.Context, lat, lon float64, radius int, category st
 out center tags 500;`, category, radius, lat, lon, category, radius, lat, lon)
 
 	overpassURL := "https://overpass-api.de/api/interpreter?data=" + url.QueryEscape(query)
+	ctx, cancel := context.WithTimeout(ctx, osmPOITimeout)
+	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", overpassURL, nil)
 	req.Header.Set("User-Agent", "Localitas Maps/1.0")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("overpass query failed: %w", err)
 	}
