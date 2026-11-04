@@ -122,4 +122,7 @@ func TestModeLabel(t *testing.T) {
 	if modeLabel("foot") != "Walking" {
 		t.Error("foot should be Walking")
 	}
+	if modeLabel("scooter") != "Scooter" || modeLabel("") != "" {
+		t.Errorf("other modes: %q %q", modeLabel("scooter"), modeLabel(""))
+	}
 }
