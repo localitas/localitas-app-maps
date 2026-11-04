@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/localitas/localitas-go"
+	"github.com/localitas/localitas-go/httputil"
 )
 
 // httpClient is a single pooled client shared across all outbound map/geocoding
@@ -20,6 +21,41 @@ import (
 // constants) so different operations keep their own limits while sharing the
 // pool. http.Client is safe for concurrent use.
 var httpClient = &http.Client{}
+
+var (
+	nominatimURL = "https://nominatim.openstreetmap.org/search"
+	osrmURL      = "https://routing.openstreetmap.de"
+	overpassURL  = "https://overpass-api.de/api/interpreter"
+	// upstream asks the public map services, again when one fails for a
+	// moment.
+	upstream = httputil.Upstream{Client: httpClient, UserAgent: "Localitas Maps/1.0"}
+)
+
+type nominatimPlace struct {
+	DisplayName string `json:"display_name"`
+	Lat         string `json:"lat"`
+	Lon         string `json:"lon"`
+}
+
+// searchNominatim asks Nominatim for up to limit places matching address.
+func searchNominatim(ctx context.Context, address string, limit int) ([]nominatimPlace, error) {
+	u := fmt.Sprintf("%s?q=%s&format=json&limit=%d&accept-language=en%s", nominatimURL, url.QueryEscape(address), limit, nominatimLocationBias())
+	ctx, cancel := context.WithTimeout(ctx, geocodeTimeout)
+	defer cancel()
+	resp, err := upstream.Get(ctx, "geocoding", u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &httputil.UpstreamError{Service: "geocoding", Err: fmt.Errorf("returned %d", resp.StatusCode)}
+	}
+	var places []nominatimPlace
+	if err := json.NewDecoder(resp.Body).Decode(&places); err != nil {
+		return nil, &httputil.UpstreamError{Service: "geocoding", Err: fmt.Errorf("parse: %w", err)}
+	}
+	return places, nil
+}
 
 const (
 	geocodeTimeout    = 10 * time.Second
@@ -35,22 +71,11 @@ func Geocode(ctx context.Context, address string) (*Location, error) {
 	if address == "" {
 		return nil, fmt.Errorf("address is required")
 	}
-	u := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=1&accept-language=en%s", url.QueryEscape(address), nominatimLocationBias())
-	ctx, cancel := context.WithTimeout(ctx, geocodeTimeout)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
-	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-	resp, err := httpClient.Do(req)
+	results, err := searchNominatim(ctx, address, 1)
 	if err != nil {
-		return nil, fmt.Errorf("geocode failed: %w", err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-	var results []struct {
-		DisplayName string `json:"display_name"`
-		Lat         string `json:"lat"`
-		Lon         string `json:"lon"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil || len(results) == 0 {
+	if len(results) == 0 {
 		return nil, fmt.Errorf("no location found for: %s", address)
 	}
 	var lat, lon float64
@@ -66,22 +91,8 @@ func GeocodeMulti(ctx context.Context, address string, limit int) ([]Location, e
 	if limit <= 0 {
 		limit = 5
 	}
-	u := fmt.Sprintf("https://nominatim.openstreetmap.org/search?q=%s&format=json&limit=%d&accept-language=en%s", url.QueryEscape(address), limit, nominatimLocationBias())
-	ctx, cancel := context.WithTimeout(ctx, geocodeTimeout)
-	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
-	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-	resp, err := httpClient.Do(req)
+	results, err := searchNominatim(ctx, address, limit)
 	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	var results []struct {
-		DisplayName string `json:"display_name"`
-		Lat         string `json:"lat"`
-		Lon         string `json:"lon"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
 		return nil, err
 	}
 	var locs []Location
@@ -132,11 +143,11 @@ func GetDirections(ctx context.Context, store *Store, fromAddr, toAddr, mode str
 	}
 
 	// FOSSGIS OSRM servers support car/bike/foot profiles
-	osrmServer := "https://routing.openstreetmap.de/routed-car"
+	osrmServer := osrmURL + "/routed-car"
 	if mode == "bike" {
-		osrmServer = "https://routing.openstreetmap.de/routed-bike"
+		osrmServer = osrmURL + "/routed-bike"
 	} else if mode == "foot" {
-		osrmServer = "https://routing.openstreetmap.de/routed-foot"
+		osrmServer = osrmURL + "/routed-foot"
 	}
 
 	u := fmt.Sprintf("%s/route/v1/driving/%.7f,%.7f;%.7f,%.7f?overview=full&geometries=geojson&steps=true",
@@ -144,11 +155,9 @@ func GetDirections(ctx context.Context, store *Store, fromAddr, toAddr, mode str
 
 	routeCtx, cancel := context.WithTimeout(ctx, directionsTimeout)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(routeCtx, "GET", u, nil)
-	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-	resp, err := httpClient.Do(req)
+	resp, err := upstream.Get(routeCtx, "routing", u)
 	if err != nil {
-		return nil, fmt.Errorf("routing failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -164,7 +173,7 @@ func GetDirections(ctx context.Context, store *Store, fromAddr, toAddr, mode str
 		} `json:"routes"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&osrm); err != nil {
-		return nil, fmt.Errorf("parse route: %w", err)
+		return nil, &httputil.UpstreamError{Service: "routing", Err: fmt.Errorf("returned %d: parse route: %w", resp.StatusCode, err)}
 	}
 	if osrm.Code != "Ok" || len(osrm.Routes) == 0 {
 		return nil, fmt.Errorf("no route found (osrm code: %s, from: %s [%.4f,%.4f], to: %s [%.4f,%.4f])", osrm.Code, from.Name, from.Lat, from.Lon, to.Name, to.Lat, to.Lon)
@@ -273,7 +282,9 @@ func modeLabel(mode string) string {
 		return "Cycling"
 	case "foot":
 		return "Walking"
+	case "":
+		return ""
 	default:
-		return strings.Title(mode)
+		return strings.ToUpper(mode[:1]) + mode[1:]
 	}
 }

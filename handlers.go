@@ -3,6 +3,7 @@ package maps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,6 +15,15 @@ type handler struct {
 	app *App
 }
 
+// errorStatus is 502 for a public map service that failed, else otherwise.
+func errorStatus(err error, otherwise int) int {
+	var failed *httputil.UpstreamError
+	if errors.As(err, &failed) {
+		return http.StatusBadGateway
+	}
+	return otherwise
+}
+
 func (h *handler) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
@@ -22,7 +32,7 @@ func (h *handler) handleGeocode(w http.ResponseWriter, r *http.Request) {
 	}
 	loc, err := GeocodeWithCache(r.Context(), h.app.Store, q)
 	if err != nil {
-		writeErr(w, r, http.StatusNotFound, "%v", err)
+		writeErr(w, r, errorStatus(err, http.StatusNotFound), "%v", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, loc)
@@ -67,7 +77,7 @@ func (h *handler) handleDirections(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := GetDirections(r.Context(), h.app.Store, from, to, mode)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, errorStatus(err, http.StatusInternalServerError), "%v", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, result)
@@ -131,7 +141,7 @@ func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 
 	result, err := work(r.Context())
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, errorStatus(err, http.StatusInternalServerError), "%v", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, result)
@@ -145,17 +155,16 @@ func FetchOSMPOIs(ctx context.Context, lat, lon float64, radius int, category st
 );
 out center tags 500;`, category, radius, lat, lon, category, radius, lat, lon)
 
-	overpassURL := "https://overpass-api.de/api/interpreter?data=" + url.QueryEscape(query)
 	ctx, cancel := context.WithTimeout(ctx, osmPOITimeout)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", overpassURL, nil)
-	req.Header.Set("User-Agent", "Localitas Maps/1.0")
-
-	resp, err := httpClient.Do(req)
+	resp, err := upstream.Get(ctx, "Overpass", overpassURL+"?data="+url.QueryEscape(query))
 	if err != nil {
-		return nil, fmt.Errorf("overpass query failed: %w", err)
+		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, &httputil.UpstreamError{Service: "Overpass", Err: fmt.Errorf("returned %d", resp.StatusCode)}
+	}
 
 	var result struct {
 		Elements []struct {
