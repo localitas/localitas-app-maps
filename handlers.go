@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
+	client "github.com/localitas/localitas-go"
 	"github.com/localitas/localitas-go/httputil"
 )
 
@@ -101,6 +102,11 @@ func (h *handler) handlePOISearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, pois)
 }
 
+type POIImportResult struct {
+	Imported int `json:"imported"`
+	Total    int `json:"total"`
+}
+
 func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 	if h.app.Store == nil {
 		writeErr(w, r, http.StatusInternalServerError, "no store configured")
@@ -123,19 +129,16 @@ func (h *handler) handlePOIImport(w http.ResponseWriter, r *http.Request) {
 		req.Category = "amenity"
 	}
 
-	work := func(ctx context.Context) (map[string]interface{}, error) {
+	work := func(ctx context.Context) (POIImportResult, error) {
 		pois, err := FetchOSMPOIs(ctx, req.Lat, req.Lon, req.Radius, req.Category)
 		if err != nil {
-			return nil, err
+			return POIImportResult{}, err
 		}
 		count, _ := h.app.Store.BulkInsertPOIs(ctx, pois)
-		return map[string]interface{}{
-			"imported": count,
-			"total":    h.app.Store.GetPOICount(ctx),
-		}, nil
+		return POIImportResult{Imported: count, Total: h.app.Store.GetPOICount(ctx)}, nil
 	}
 
-	if h.app.client.RunAsync(w, r, work) {
+	if client.RunAsync(h.app.client, w, r, work) {
 		return
 	}
 
