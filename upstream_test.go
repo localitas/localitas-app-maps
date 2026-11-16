@@ -108,6 +108,30 @@ func TestGeocode_NotFoundAndUpstreamFailureDiffer(t *testing.T) {
 	}
 }
 
+// A geocoding try that stalls is given up after the lookup's limit and the
+// place asked for again: the limit is each try's, so one stall does not use
+// up the time of the tries after it.
+func TestGeocode_AStalledTryIsAskedAgain(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			<-r.Context().Done()
+			return
+		}
+		w.Write([]byte(`[{"display_name":"Home","lat":"37.3349","lon":"-122.0090"}]`))
+	}))
+	t.Cleanup(srv.Close)
+	oldURL, oldTimeout, oldUpstream := nominatimURL, geocodeTimeout, upstream
+	nominatimURL, geocodeTimeout = srv.URL+"/search", 200*time.Millisecond
+	upstream.Delay = time.Millisecond
+	t.Cleanup(func() { nominatimURL, geocodeTimeout, upstream = oldURL, oldTimeout, oldUpstream })
+	h := &handler{app: &App{}}
+
+	if w := get(h.handleGeocode, "/api/geocode?q=Home"); w.Code != http.StatusOK || calls.Load() != 2 {
+		t.Errorf("geocode = %d %s after %d tries, want 200 after 2", w.Code, w.Body, calls.Load())
+	}
+}
+
 // Overpass's places near a point come back as POIs.
 func TestFetchOSMPOIs(t *testing.T) {
 	serveMaps(t, 0, 0, 0)

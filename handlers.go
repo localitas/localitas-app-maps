@@ -158,9 +158,7 @@ func FetchOSMPOIs(ctx context.Context, lat, lon float64, radius int, category st
 );
 out center tags 500;`, category, radius, lat, lon, category, radius, lat, lon)
 
-	ctx, cancel := context.WithTimeout(ctx, osmPOITimeout)
-	defer cancel()
-	resp, err := upstream.Get(ctx, "Overpass", overpassURL+"?data="+url.QueryEscape(query))
+	resp, err := within(osmPOITimeout).Get(ctx, "Overpass", overpassURL+"?data="+url.QueryEscape(query))
 	if err != nil {
 		return nil, err
 	}
