@@ -5,13 +5,12 @@ import (
 	"time"
 )
 
-// The geocode/directions/POI lookups used to allocate a fresh http.Client per
-// request. They now share one pooled client and bound each call with a context
-// deadline. Assert the shared client exists and the per-operation timeouts are
-// sane positive bounds.
-func TestSharedHTTPClientAndTimeouts(t *testing.T) {
-	if httpClient == nil {
-		t.Fatal("map lookups must share a pooled http client")
+// The map lookups ask through the SDK's upstream client, which is pooled and
+// pings an idle HTTP/2 connection a NAT may have dropped; a plain client of
+// their own would keep a dead connection and stall every try on it.
+func TestLookupsUseTheSDKClientAndSaneTimeouts(t *testing.T) {
+	if upstream.Client != nil {
+		t.Fatal("map lookups bring their own client, without the SDK's stale-connection check")
 	}
 	for name, d := range map[string]time.Duration{
 		"geocode":    geocodeTimeout,

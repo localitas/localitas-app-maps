@@ -14,21 +14,14 @@ import (
 	"github.com/localitas/localitas-go/httputil"
 )
 
-// httpClient is a single pooled client shared across all outbound map/geocoding
-// calls (Nominatim/OSRM/Overpass), created once instead of per request, so
-// connections to those fixed upstream hosts are reused. It carries no hard
-// Timeout; each call bounds itself with a context deadline (see the timeout
-// constants) so different operations keep their own limits while sharing the
-// pool. http.Client is safe for concurrent use.
-var httpClient = &http.Client{}
-
 var (
 	nominatimURL = "https://nominatim.openstreetmap.org/search"
 	osrmURL      = "https://routing.openstreetmap.de"
 	overpassURL  = "https://overpass-api.de/api/interpreter"
 	// upstream asks the public map services, again when one fails for a
-	// moment.
-	upstream = httputil.Upstream{Client: httpClient, UserAgent: "Localitas Maps/1.0"}
+	// moment, through the SDK's pooled client, which drops an idle
+	// connection a NAT lost.
+	upstream = httputil.Upstream{UserAgent: "Localitas Maps/1.0"}
 )
 
 type nominatimPlace struct {
