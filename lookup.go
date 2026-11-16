@@ -14,21 +14,14 @@ import (
 	"github.com/localitas/localitas-go/httputil"
 )
 
-// httpClient is a single pooled client shared across all outbound map/geocoding
-// calls (Nominatim/OSRM/Overpass), created once instead of per request, so
-// connections to those fixed upstream hosts are reused. It carries no hard
-// Timeout; each call bounds itself with a context deadline (see the timeout
-// constants) so different operations keep their own limits while sharing the
-// pool. http.Client is safe for concurrent use.
-var httpClient = &http.Client{}
-
 var (
 	nominatimURL = "https://nominatim.openstreetmap.org/search"
 	osrmURL      = "https://routing.openstreetmap.de"
 	overpassURL  = "https://overpass-api.de/api/interpreter"
 	// upstream asks the public map services, again when one fails for a
-	// moment.
-	upstream = httputil.Upstream{Client: httpClient, UserAgent: "Localitas Maps/1.0"}
+	// moment, through the SDK's pooled client, which drops an idle
+	// connection a NAT lost.
+	upstream = httputil.Upstream{UserAgent: "Localitas Maps/1.0"}
 )
 
 type nominatimPlace struct {
@@ -40,9 +33,7 @@ type nominatimPlace struct {
 // searchNominatim asks Nominatim for up to limit places matching address.
 func searchNominatim(ctx context.Context, address string, limit int) ([]nominatimPlace, error) {
 	u := fmt.Sprintf("%s?q=%s&format=json&limit=%d&accept-language=en%s", nominatimURL, url.QueryEscape(address), limit, nominatimLocationBias())
-	ctx, cancel := context.WithTimeout(ctx, geocodeTimeout)
-	defer cancel()
-	resp, err := upstream.Get(ctx, "geocoding", u)
+	resp, err := within(geocodeTimeout).Get(ctx, "geocoding", u)
 	if err != nil {
 		return nil, err
 	}
@@ -57,11 +48,20 @@ func searchNominatim(ctx context.Context, address string, limit int) ([]nominati
 	return places, nil
 }
 
-const (
+// Each lookup's limit is per try: a deadline over all of a lookup's tries
+// as short as one try left a stalled first try no time to be asked again.
+var (
 	geocodeTimeout    = 10 * time.Second
 	directionsTimeout = 15 * time.Second
 	osmPOITimeout     = 30 * time.Second
 )
+
+// within is upstream with limit for each try.
+func within(limit time.Duration) httputil.Upstream {
+	up := upstream
+	up.AttemptTimeout = limit
+	return up
+}
 
 func nominatimLocationBias() string {
 	return client.LocationBias()
@@ -153,9 +153,7 @@ func GetDirections(ctx context.Context, store *Store, fromAddr, toAddr, mode str
 	u := fmt.Sprintf("%s/route/v1/driving/%.7f,%.7f;%.7f,%.7f?overview=full&geometries=geojson&steps=true",
 		osrmServer, from.Lon, from.Lat, to.Lon, to.Lat)
 
-	routeCtx, cancel := context.WithTimeout(ctx, directionsTimeout)
-	defer cancel()
-	resp, err := upstream.Get(routeCtx, "routing", u)
+	resp, err := within(directionsTimeout).Get(ctx, "routing", u)
 	if err != nil {
 		return nil, err
 	}
