@@ -48,55 +48,68 @@ The browser UI displays an interactive map for searching locations, viewing geoc
 
 ## Build & Deploy
 
+Run these in the app's repository, `~/localitas-app-maps`.
+
 ### Version
 
 ```bash
-./maps-server --version
+bin/maps-server --version
 ```
 
 ### Build from source
 
 ```bash
-# Development (native)
-cd apps/maps && go build -o bin/maps-server ./cmd/maps-server
+# Native binary
+go build -o bin/maps-server ./cmd/maps-server
 
-# Cross-compile for Linux
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath -o bin/maps-server-linux-amd64 ./cmd/maps-server
+# Native binary plus the Linux amd64 binary the Docker image is built from (maps-server-linux-amd64)
+make build-linux
 ```
+
+`make lint` runs gofmt and go vet; `make test` runs them and then the tests. `make build` runs only the lint step.
+
+### Run natively
+
+```bash
+make start   # writes the launchd service com.localitas.app.maps for bin/maps-server and loads it on port 9207
+make stop
+make logs    # follows ~/.localitas/logs/maps/stdout.log
+```
+
+The app announces itself to core when it starts, and core serves it at `/apps/ext/maps/`.
 
 ### Docker
 
-Build a Docker image directly from the binary:
-
 ```bash
-# Default base image (debian:12-slim)
-./maps-server docker-build
-
-# Custom base image
-./maps-server docker-build --base ubuntu:24.04
-
-# Custom Dockerfile
-./maps-server docker-build --dockerfile ./my.Dockerfile
-
-# Tag and push to registry
-./maps-server docker-build --tag ghcr.io/localitas/maps:latest --push
+make build-docker   # builds the Linux binary and the maps:latest image
+make start-docker   # runs container "maps" on port 9207, labelled localitas.app=true
+make stop-docker
+make logs-docker
 ```
 
-The `docker-build` command requires a Linux amd64 binary in the same directory. Run `make deploy-build` from the project root first.
+Core registers containers labelled `localitas.app=true` once Docker reports them healthy.
+
+### Publish
+
+```bash
+# Run the tests, build the image, push ghcr.io/localitas/localitas-app-maps:latest and :<VERSION>
+make docker-push
+
+# Build dist/maps-server-darwin-arm64 and dist/maps-server-darwin-amd64
+# and create GitHub release vX.Y.Z on this repository with them
+make release VERSION=vX.Y.Z
+```
+
+`VERSION` defaults to `git describe --tags --always --dirty`.
 
 ### Download
 
-Pre-built binaries are available on the [GitHub releases page](https://github.com/localitas/localitas/releases).
+Pre-built macOS binaries are on the [releases page](https://github.com/localitas/localitas-app-maps/releases):
+- `maps-server-darwin-arm64` (Apple Silicon)
+- `maps-server-darwin-amd64` (Intel)
 
-Each release includes three builds per app:
-- `maps-server-darwin-arm64` (macOS Apple Silicon)
-- `maps-server-linux-amd64` (Linux x86_64)
-- `maps-server-linux-arm64` (Linux ARM64)
+Every push to `main` publishes a release: `.github/workflows/release.yml` runs the tests and releases both binaries as `v0.1.<commit count>.<UTC timestamp>`. `make release` publishes one by hand.
 
 Download with the GitHub CLI:
 
-    gh release download --repo localitas/localitas --pattern 'maps-server-*'
-
-### Release
-
-All app binaries are published to GitHub releases as part of `make deploy-upload-image`.
+    gh release download --repo localitas/localitas-app-maps --pattern 'maps-server-*'
