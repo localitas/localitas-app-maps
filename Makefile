@@ -14,13 +14,12 @@ WORK_DIR := $(shell pwd)
 # ── Build & Test ──────────────────────────────────────────────
 
 build: lint
-
-build-linux: lint
-	@mkdir -p bin
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath \
-		-o maps-server-linux-amd64 ./cmd/maps-server
 	@mkdir -p bin
 	go build -o bin/maps-server ./cmd/maps-server
+
+build-linux: lint
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w" -trimpath \
+		-o maps-server-linux-amd64 ./cmd/maps-server
 
 test: lint
 	go test -v ./...
