@@ -62,7 +62,8 @@ bin/maps-server --version
 # Native binary (bin/maps-server)
 make build
 
-# Linux amd64 binary the Docker image is built from (maps-server-linux-amd64)
+# Linux binary the Docker image is built from, for the Docker daemon's
+# architecture (maps-server-linux-arm64 on Apple silicon); LINUX_ARCH=amd64 overrides
 make build-linux
 ```
 
